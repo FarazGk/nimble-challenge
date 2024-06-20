@@ -18,4 +18,6 @@ spec:
         imagePullPolicy: Never
         env:
         - name: BACKEND_URL
-          value: "http://backend-service:5001"
+          value: "http://backend-service:8080"
+        ports:
+        - containerPort: 8080

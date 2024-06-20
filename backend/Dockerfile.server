@@ -1,5 +1,5 @@
 # Use the official Python image from the Docker Hub
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 # Set the working directory
 WORKDIR /app
@@ -7,11 +7,25 @@ WORKDIR /app
 # Copy the current directory contents into the container at /app
 COPY . /app
 
-# Install the necessary packages
-RUN pip install flask
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxrender1 \
+    libxext6 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Make port 5000 available to the world outside this container
-EXPOSE 5000
+# Install the necessary packages
+RUN pip install aiohttp aiortc numpy opencv-python
+
+ENV ROLE server
+
+ENV HOST 0.0.0.0
+ENV PORT 8360
+
+# Expose port 8080
+EXPOSE 8080
 
 # Define the command to run the application
 CMD ["python", "server.py"]
