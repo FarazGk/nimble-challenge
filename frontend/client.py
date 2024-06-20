@@ -1,84 +1,37 @@
-#client.py
+import aiohttp
 import asyncio
-import cv2
-import numpy as np
-from aiortc import RTCPeerConnection, RTCSessionDescription, VideoStreamTrack
-from aiortc.contrib.signaling import TcpSocketSignaling, BYE
-import time
+import os
 
-class VideoFrameReceiver(VideoStreamTrack):
-    def __init__(self, track):
-        super().__init__()
-        self.track = track
+counter = 0
 
-    async def recv(self):
-        frame = await self.track.recv()
-        return frame
+backend_url = os.getenv('BACKEND_URL', 'http://backend-service:5001')
 
-async def display_frames(queue):
+async def wait_for_backend(session):
     while True:
-        frame = await queue.get()
-        if frame is None:
-            break
-        frame = frame.to_ndarray(format="bgr24")
-        cv2.imshow("Frame", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    cv2.destroyAllWindows()
+        try:
+            async with session.get(f'{backend_url}/hello') as response:
+                if response.status == 200:
+                    print("Backend service is available.", flush=True)
+                    return
+        except aiohttp.ClientConnectionError:
+            pass
+        print("Waiting for backend service...", flush=True)
+        await asyncio.sleep(1)
 
-async def run(pc, signaling, queue):
-    @pc.on("datachannel")
-    def on_datachannel(channel):
-        @channel.on("message")
-        def on_message(message):
-            print(f"Server: {message}")
-            # Dummy coordinates
-            channel.send("100,100")
+async def main():
+    global counter
+    async with aiohttp.ClientSession() as session:
+        await wait_for_backend(session)
+        while True:
+            counter += 1
+            try:
+                async with session.get(f'{backend_url}/hello') as response:
+                    backend_message = await response.json()
+                    print(f"Hello from client, iteration {counter}", flush=True)
+                    print(f"Backend says: {backend_message['message']}, iteration {backend_message['iteration']}", flush=True)
+            except Exception as e:
+                print(f"Error: {e}", flush=True)
+            await asyncio.sleep(1)  # Reduced the sleep interval
 
-    @pc.on("track")
-    def on_track(track):
-        print("Client received track")
-        receiver = VideoFrameReceiver(track)
-        pc.addTrack(receiver)
-
-        async def recv_video():
-            while True:
-                frame = await receiver.recv()
-                await queue.put(frame)
-        asyncio.create_task(recv_video())
-
-    await signaling.connect()
-    print("Client connected to signaling")
-
-    while True:
-        obj = await signaling.receive()
-        if isinstance(obj, RTCSessionDescription):
-            await pc.setRemoteDescription(obj)
-            if obj.type == "offer":
-                await pc.setLocalDescription(await pc.createAnswer())
-                await signaling.send(pc.localDescription)
-                print("Client sent local description")
-        elif obj is BYE:
-            print("Exiting")
-            break
-        else:
-            print(obj)
-
-if __name__ == "__main__":
-    print("Starting client")
-    time.sleep(5)
-    signaling = TcpSocketSignaling('backend-service.default.svc.cluster.local', 8080)
-    pc = RTCPeerConnection()
-
-    frame_queue = asyncio.Queue()
-
-    loop = asyncio.get_event_loop()
-    try:
-        loop.create_task(display_frames(frame_queue))
-        loop.run_until_complete(run(pc, signaling, frame_queue))
-    except KeyboardInterrupt:
-        pass
-    finally:
-        frame_queue.put_nowait(None)
-        loop.run_until_complete(signaling.close())
-        loop.run_until_complete(pc.close())
+if __name__ == '__main__':
+    asyncio.run(main())
